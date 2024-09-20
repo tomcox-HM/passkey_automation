@@ -45,14 +45,10 @@ def select_date(day, date_type):
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, f"{date_type}-date"))
         ).click()
-
-        time.sleep(5)
         
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, f"//a[@class='ui-state-default' and @data-date='{day}']"))
         ).click()
-
-        time.sleep(5)
 
         print(f"Successfully selected {date_type} date: {day}")
         return True
@@ -106,7 +102,24 @@ def extract_error_message(error):
     return main_error        
 
 def check_hotel_availability():
-    return {"status": "hotels_available", "message": 0}
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "hotels-count"))
+            )
+            # If this element is present, hotels are available
+            available_hotels = driver.find_element(By.ID, "hotels-count").text
+            available_hotels_count = available_hotels.split()[0]
+            return {"status": "hotels_available", "message": available_hotels_count}
+        
+        except TimeoutException:
+            # Check for the fully booked message if the hotels count is not found
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "message-room"))
+                )
+                return {"status": "fully_booked", "message": "Yes"}
+            except TimeoutException:
+                return {"status": "error", "message": "Unexpected page state."}
 
 def make_reservation_page():
     try:
@@ -163,6 +176,8 @@ def process_url(url):
             EC.element_to_be_clickable((By.ID, "submitQuickBook"))
         ).click()
         
+        time.sleep(1)
+
         availability = check_hotel_availability()
         return availability
         
