@@ -17,14 +17,13 @@ def extract_date_range(driver):
         date_pattern = r'([A-Za-z]+ \d{1,2}, \d{4})'
         dates = re.findall(date_pattern, text)
         if len(dates) == 2:
-            checkin_day = dates[0].split()[1].strip(",")
-            checkout_day = dates[1].split()[1].strip(",")
-            return checkin_day, checkout_day
+            checkin_date = dates[0].split()
+            checkout_date = dates[1].split()
+            return (checkin_date[1].strip(","), checkin_date[0]), (checkout_date[1].strip(","), checkout_date[0])
         else:
             raise ValueError("Unable to find valid date range in provided text.")
 
     try:
-        # First, try to extract from the entire body
         event_info = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.TAG_NAME, 'body'))
         ).text
@@ -32,7 +31,6 @@ def extract_date_range(driver):
     except ValueError:
         print("Failed to extract dates from body text, trying backup method...")
         try:
-            # Backup method: try to extract from the specific element
             date_element = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.ID, 'info_eventDates'))
             )
@@ -45,20 +43,36 @@ def select_date(day, date_type):
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, f"{date_type}-date"))
         ).click()
-        
+
+        date_selector = f"//a[@class='ui-state-default' and @data-date='{day}']"
+        date_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, date_selector))
+        )
+
+        driver.execute_script("arguments[0].style.border='3px solid red'", date_element)
+        driver.execute_script("console.log(arguments[0]);", date_element)
+
+        if date_element:
+            # Get the parent <td> element to extract month and year
+            parent_td = date_element.find_element(By.XPATH, "./ancestor::td")
+            month_number = parent_td.get_attribute("data-month")
+            year_number = parent_td.get_attribute("data-year")
+            print(f"Accessing month: {month_number}, year: {year_number}")
+
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, f"//a[@class='ui-state-default' and @data-date='{day}']"))
         ).click()
 
         print(f"Successfully selected {date_type} date: {day}")
         return True
-
+        
     except TimeoutException:
         print(f"Timeout occurred while trying to select {date_type} date: {day}")
         raise
     except Exception as e:
         print(f"Error in select_date for {date_type} date {day}: {e}")
         raise
+
 
 def check_reservations_closed():
     reservations_closed = False
@@ -160,14 +174,16 @@ def process_url(url):
 
         driver.execute_script("window.scrollTo(0, 0);")
 
-        if make_reservation_page():
+        """if make_reservation_page():
             print("Handled dropdown page, proceeding with regular flow")
 
         if check_reservations_closed():
             print(f"Reservations are closed for {url}")
-            return {"status": "reservations_closed", "message": "No"}
+            return {"status": "reservations_closed", "message": "No"}"""
         
-        checkin_day, checkout_day = extract_date_range(driver)
+        (checkin_day, checkin_month), (checkout_day, checkout_month) = extract_date_range(driver)
+        print(f"check-in day: {checkin_day}, Month: {checkin_month}")
+        print(f"check-out day: {checkout_day}, Month: {checkout_month}")
         
         select_date(checkin_day, "check-in")
         select_date(checkout_day, "check-out")
@@ -199,8 +215,8 @@ def main():
         count = 0 
 
         for row in reader:
-            if count >= 20:
-               break
+            #if count >= 20:
+             #  break
 
             url = row['URLs']
             result = process_url(url)
@@ -218,6 +234,7 @@ def main():
             writer.writerow(row)
 
             count += 1
+            break
 
     input("Press Enter to close the browser...")
     driver.quit()
