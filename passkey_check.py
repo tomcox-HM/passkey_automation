@@ -9,7 +9,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 chrome_options = Options()
-chrome_options.add_experimental_option("detach", True)
+chrome_options.add_argument("--headless")
+#chrome_options.add_experimental_option("detach", True)
 driver = webdriver.Chrome(options=chrome_options)
 
 def extract_date_range(driver):
@@ -63,13 +64,10 @@ def select_date(day, date_type, expected_month):
         # Get the parent <td> element to check month
         month_number = date_element.get_attribute("data-month")
 
-        print(f"Accessing month: {month_number}, expected month: {expected_month_number}")
-
         # Check if the month matches
         if int(month_number) == expected_month_number:
             # If the month matches, click the date element
             date_element.click()
-            print(f"Successfully selected {date_type} date: {day}")
             return True
         else:
             print(f"Month mismatch: found {month_number}, expected {expected_month_number}")
@@ -81,26 +79,6 @@ def select_date(day, date_type, expected_month):
     except Exception as e:
         print(f"Error in select_date for {date_type} date {day}: {e}")
         raise
-
-def check_reservations_closed():
-    reservations_closed = False
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'Reservations are closed')]"))
-        )
-        reservations_closed = True
-    except TimeoutException:
-        pass
-
-    try:
-        WebDriverWait(driver, 2).until(
-            EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'The group rate is no longer available')]"))
-        )
-        reservations_closed = True
-    except TimeoutException:
-        pass
-
-    return reservations_closed
 
 def accept_cookies():
     try:
@@ -208,8 +186,7 @@ def process_url(url):
             if make_reservation_page():
                 print("Handled dropdown page, proceeding with regular flow")
 
-        if check_reservations_closed():
-            print(f"Reservations are closed for {url}")
+        if not check_calendar_exists():
             return {"status": "reservations_closed", "message": "No"}
         
         (checkin_day, checkin_month), (checkout_day, checkout_month) = extract_date_range(driver)
@@ -250,10 +227,6 @@ def main():
             print(f"Processing URL {index} of {total_urls}: {url}")
             
             result = process_url(url)
-
-        for row in reader:
-            url = row['URLs']
-            result = process_url(url)
             
             status_mapping = {
                 'reservations_closed': {'Reservations Open': f'{result['message']}'},
@@ -264,6 +237,7 @@ def main():
 
             if result['status'] in status_mapping:
                 row.update(status_mapping[result['status']])
+            
 
             writer.writerow(row)
             print(f"Completed processing URL {index} of {total_urls}")
