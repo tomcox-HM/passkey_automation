@@ -9,8 +9,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 chrome_options = Options()
-chrome_options.add_argument("--headless")
-#chrome_options.add_experimental_option("detach", True)
+#chrome_options.add_argument("--headless")
+chrome_options.add_experimental_option("detach", True)
 driver = webdriver.Chrome(options=chrome_options)
 
 def extract_date_range(driver):
@@ -25,14 +25,14 @@ def extract_date_range(driver):
             raise ValueError("Unable to find valid date range in provided text.")
 
     try:
-        event_info = WebDriverWait(driver, 10).until(
+        event_info = WebDriverWait(driver, 1).until(
             EC.presence_of_element_located((By.TAG_NAME, 'body'))
         ).text
         return extract_from_text(event_info)
     except ValueError:
         print("Failed to extract dates from body text, trying backup method...")
         try:
-            date_element = WebDriverWait(driver, 10).until(
+            date_element = WebDriverWait(driver, 1).until(
                 EC.presence_of_element_located((By.ID, 'info_eventDates'))
             )
             return extract_from_text(date_element.text)
@@ -47,14 +47,14 @@ def select_date(day, date_type, expected_month):
     }[expected_month]
     
     try:
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 1).until(
             EC.element_to_be_clickable((By.ID, f"{date_type}-date"))
         ).click()
 
         # Construct the id based on date_type, month, and day
         element_id = f"dp_{'in' if date_type == 'check-in' else 'out'}_{expected_month_number}_{day}"
         
-        date_element = WebDriverWait(driver, 10).until(
+        date_element = WebDriverWait(driver, 1).until(
             EC.element_to_be_clickable((By.ID, element_id))
         )
 
@@ -101,35 +101,44 @@ def extract_error_message(error):
     
     return main_error        
 
-def check_hotel_availability():
+def check_hotel_availability(total_hotels):
+    fully_booked_hotels = None
     try:
-        single_hotel = WebDriverWait(driver, 5).until(
+        single_hotel = WebDriverWait(driver, 1).until(
             EC.presence_of_element_located((By.XPATH, "//div[@class='legend-selected']/span[@class='selected']"))
         )
         return {"status": "hotels_available", "message": "1"}
     
     except TimeoutException:
         try:
-            hotels_count_element = WebDriverWait(driver, 5).until(
+            hotels_count_element = WebDriverWait(driver, 1).until(
                 EC.presence_of_element_located((By.ID, "hotels-count"))
             )
             available_hotels = hotels_count_element.text
-            available_hotels_count = available_hotels.split()[0]
-            return {"status": "hotels_available", "message": available_hotels_count}
+            available_hotels_count = int(available_hotels.split()[0])
+
+            if total_hotels is not None:
+                fully_booked_hotels = total_hotels - available_hotels_count
+
+            return {"status": "hotels_available", "message": available_hotels_count, "fully_booked_hotels": fully_booked_hotels}
         
         except TimeoutException:
             try:
-                no_lodging_message = WebDriverWait(driver, 5).until(
+                no_lodging_message = WebDriverWait(driver, 1).until(
                     EC.presence_of_element_located((By.XPATH, "//h3[@class='message-room' and contains(text(), 'No lodging matches your search criteria')]"))
                 )
-                return {"status": "fully_booked", "message": "Yes"}
+                if total_hotels is not None:
+                    fully_booked_hotels = total_hotels
+                return {"status": "fully_booked", "message": "Yes", "fully_booked_hotels": fully_booked_hotels}
             
             except TimeoutException:
                 try:
-                    fully_booked_message = WebDriverWait(driver, 5).until(
+                    fully_booked_message = WebDriverWait(driver, 1).until(
                         EC.presence_of_element_located((By.CLASS_NAME, "message-room"))
                     )
-                    return {"status": "fully_booked", "message": "Yes"}
+                    if total_hotels is not None:
+                        fully_booked_hotels = total_hotels
+                    return {"status": "fully_booked", "message": "Yes", "fully_booked_hotels": fully_booked_hotels}
                 
                 except TimeoutException:
                     return {"status": "error", "message": "Unexpected page state"}
@@ -137,7 +146,7 @@ def check_hotel_availability():
 def make_reservation_page():
     try:
         try:
-            dropdown = WebDriverWait(driver, 5).until(
+            dropdown = WebDriverWait(driver, 1).until(
                 EC.presence_of_element_located((By.ID, "groupTypeId"))
             )
             try:
@@ -149,7 +158,7 @@ def make_reservation_page():
         except TimeoutException:
             print("Dropdown not found, proceeding to find 'Make Reservation' button")
 
-        make_reservation_button = WebDriverWait(driver, 5).until(
+        make_reservation_button = WebDriverWait(driver, 1).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Make Reservation') or @id='submit-btn']"))
         )
         make_reservation_button.click()
@@ -164,19 +173,40 @@ def make_reservation_page():
     
 def check_calendar_exists():
     try:
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 1).until(
             EC.presence_of_element_located((By.ID, "check-in-date"))
         )
         return True
     except TimeoutException:
         return False
+    
+def check_view_all_hotels_link():
+    try:
+        view_all_hotels_link = WebDriverWait(driver, 1).until(
+            EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'item') and contains(@href, '/hotels/all')]"))
+        )
+        view_all_hotels_link.click()
+        return True
+    except TimeoutException:
+        print("'View all hotels' link not found")
+        return False
+
+def get_total_hotels_count():
+    try:
+        hotels_count_element = WebDriverWait(driver, 1).until(
+            EC.presence_of_element_located((By.ID, "hotels-count"))
+        )
+        total_hotels = hotels_count_element.text.split()[0]
+        return int(total_hotels)
+    except (TimeoutException, ValueError):
+        print("Unable to get total hotels count")
+        return None
 
 def process_url(url):
     driver.get(url)
     
     try:
         accept_cookies()
-
         driver.execute_script("window.scrollTo(0, 0);")
 
         if check_calendar_exists():
@@ -189,6 +219,12 @@ def process_url(url):
         if not check_calendar_exists():
             return {"status": "reservations_closed", "message": "No"}
         
+        total_hotels = None
+        if check_view_all_hotels_link():
+            total_hotels = get_total_hotels_count()
+            driver.back()  # Go back to the main page
+            time.sleep(2)
+        
         (checkin_day, checkin_month), (checkout_day, checkout_month) = extract_date_range(driver)
         print(f"check-in day: {checkin_day}, Month: {checkin_month}")
         print(f"check-out day: {checkout_day}, Month: {checkout_month}")
@@ -196,25 +232,27 @@ def process_url(url):
         select_date(checkin_day, "check-in", checkin_month)
         select_date(checkout_day, "check-out", checkout_month)
         
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 1).until(
             EC.element_to_be_clickable((By.ID, "submitQuickBook"))
         ).click()
 
-        availability = check_hotel_availability()
+        availability = check_hotel_availability(total_hotels)
+
         return availability
         
     except Exception as e:
         print(f"Error processing {url}: {e}")
         driver.save_screenshot("error_processing_url.png")
         error_message = extract_error_message(e)
-        return {"status": "error", "message": str(error_message)}
+        return {"status": "error", "message": str(error_message), "fully_booked_hotels": None}
 
 def main():
+    start_time = time.time()
     with open('passkey_urls.csv', 'r', newline='') as input_file, \
         open('updated_passkey_urls.csv', 'w', newline='') as output_file:
         
         reader = csv.DictReader(input_file)
-        fieldnames = reader.fieldnames + ['Reservations Open', 'Fully Booked', 'Available Hotels', 'Error Message']
+        fieldnames = reader.fieldnames + ['Reservations Open', 'Fully Booked', 'Available Hotels', 'Fully Booked Hotels', 'Error Message']
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -230,19 +268,22 @@ def main():
             
             status_mapping = {
                 'reservations_closed': {'Reservations Open': f'{result['message']}'},
-                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': f'{result['message']}'},
-                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Available Hotels': f'{result['message']}'},
-                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Available Hotels': 'Error', 'Error Message': f'{result['message']}'}
+                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': f'{result['message']}', 'Fully Booked Hotels': f'{result['fully_booked_hotels']}'},
+                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Available Hotels': f'{result['message']}', 'Fully Booked Hotels': f'{result['fully_booked_hotels']}'},
+                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Available Hotels': 'Error', 'Fully Booked Hotels': 'Error', 'Error Message': f'{result['message']}'}
             }
 
             if result['status'] in status_mapping:
                 row.update(status_mapping[result['status']])
-            
 
             writer.writerow(row)
             print(f"Completed processing URL {index} of {total_urls}")
 
+    end_time = time.time()
+    total_time = end_time - start_time
+
     print("All URLs have been processed. Results saved in 'updated_passkey_urls.csv'.")
+    print(f"Total execution time: {total_time:.2f} seconds")
     driver.quit()
 
 if __name__ == "__main__":
