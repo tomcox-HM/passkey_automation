@@ -38,41 +38,49 @@ def extract_date_range(driver):
         except (ValueError, TimeoutException, NoSuchElementException) as e:
             raise ValueError(f"Unable to find valid date range using both methods: {str(e)}")
 
-def select_date(day, date_type):
+def select_date(day, date_type, expected_month):
+    expected_month_number = {
+        'January': 0, 'February': 1, 'March': 2, 'April': 3,
+        'May': 4, 'June': 5, 'July': 6, 'August': 7,
+        'September': 8, 'October': 9, 'November': 10, 'December': 11
+    }[expected_month]
+    
     try:
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.ID, f"{date_type}-date"))
         ).click()
 
-        date_selector = f"//a[@class='ui-state-default' and @data-date='{day}']"
+        # Construct the id based on date_type, month, and day
+        element_id = f"dp_{'in' if date_type == 'check-in' else 'out'}_{expected_month_number}_{day}"
+        
         date_element = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, date_selector))
+            EC.element_to_be_clickable((By.ID, element_id))
         )
 
-        driver.execute_script("arguments[0].style.border='3px solid red'", date_element)
-        driver.execute_script("console.log(arguments[0]);", date_element)
+        # Highlight the selected element for debugging
+        #driver.execute_script("arguments[0].style.border='3px solid red'", date_element)
 
-        if date_element:
-            # Get the parent <td> element to extract month and year
-            parent_td = date_element.find_element(By.XPATH, "./ancestor::td")
-            month_number = parent_td.get_attribute("data-month")
-            year_number = parent_td.get_attribute("data-year")
-            print(f"Accessing month: {month_number}, year: {year_number}")
+        # Get the parent <td> element to check month
+        month_number = date_element.get_attribute("data-month")
 
-        WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, f"//a[@class='ui-state-default' and @data-date='{day}']"))
-        ).click()
+        print(f"Accessing month: {month_number}, expected month: {expected_month_number}")
 
-        print(f"Successfully selected {date_type} date: {day}")
-        return True
-        
+        # Check if the month matches
+        if int(month_number) == expected_month_number:
+            # If the month matches, click the date element
+            date_element.click()
+            print(f"Successfully selected {date_type} date: {day}")
+            return True
+        else:
+            print(f"Month mismatch: found {month_number}, expected {expected_month_number}")
+            raise ValueError("Month mismatch")
+
     except TimeoutException:
         print(f"Timeout occurred while trying to select {date_type} date: {day}")
         raise
     except Exception as e:
         print(f"Error in select_date for {date_type} date {day}: {e}")
         raise
-
 
 def check_reservations_closed():
     reservations_closed = False
@@ -116,33 +124,44 @@ def extract_error_message(error):
     return main_error        
 
 def check_hotel_availability():
+    try:
+        single_hotel = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.XPATH, "//div[@class='legend-selected']/span[@class='selected']"))
+        )
+        return {"status": "hotels_available", "message": "1"}
+    
+    except TimeoutException:
         try:
-            WebDriverWait(driver, 10).until(
+            hotels_count_element = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.ID, "hotels-count"))
             )
-            # If this element is present, hotels are available
-            available_hotels = driver.find_element(By.ID, "hotels-count").text
+            available_hotels = hotels_count_element.text
             available_hotels_count = available_hotels.split()[0]
             return {"status": "hotels_available", "message": available_hotels_count}
         
         except TimeoutException:
-            # Check for the fully booked message if the hotels count is not found
             try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "message-room"))
+                no_lodging_message = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//h3[@class='message-room' and contains(text(), 'No lodging matches your search criteria')]"))
                 )
                 return {"status": "fully_booked", "message": "Yes"}
+            
             except TimeoutException:
-                return {"status": "error", "message": "Unexpected page state."}
+                try:
+                    fully_booked_message = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "message-room"))
+                    )
+                    return {"status": "fully_booked", "message": "Yes"}
+                
+                except TimeoutException:
+                    return {"status": "error", "message": "Unexpected page state"}
 
 def make_reservation_page():
     try:
-        # Check if the dropdown is present
         try:
             dropdown = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.ID, "groupTypeId"))
             )
-            # If dropdown is found, select the first option
             try:
                 select = Select(dropdown)
                 select.select_by_index(1)
@@ -152,7 +171,6 @@ def make_reservation_page():
         except TimeoutException:
             print("Dropdown not found, proceeding to find 'Make Reservation' button")
 
-        # Look for the "Make Reservation" button
         make_reservation_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Make Reservation') or @id='submit-btn']"))
         )
@@ -165,6 +183,15 @@ def make_reservation_page():
     except Exception as e:
         print(f"Error handling initial page: {e}")
         return False
+    
+def check_calendar_exists():
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "check-in-date"))
+        )
+        return True
+    except TimeoutException:
+        return False
 
 def process_url(url):
     driver.get(url)
@@ -174,25 +201,27 @@ def process_url(url):
 
         driver.execute_script("window.scrollTo(0, 0);")
 
-        """if make_reservation_page():
-            print("Handled dropdown page, proceeding with regular flow")
+        if check_calendar_exists():
+            print("Calendar found, proceeding with date selection")
+        else:
+            print("Calendar not found, checking for dropdown or 'Make Reservation' button")
+            if make_reservation_page():
+                print("Handled dropdown page, proceeding with regular flow")
 
         if check_reservations_closed():
             print(f"Reservations are closed for {url}")
-            return {"status": "reservations_closed", "message": "No"}"""
+            return {"status": "reservations_closed", "message": "No"}
         
         (checkin_day, checkin_month), (checkout_day, checkout_month) = extract_date_range(driver)
         print(f"check-in day: {checkin_day}, Month: {checkin_month}")
         print(f"check-out day: {checkout_day}, Month: {checkout_month}")
         
-        select_date(checkin_day, "check-in")
-        select_date(checkout_day, "check-out")
+        select_date(checkin_day, "check-in", checkin_month)
+        select_date(checkout_day, "check-out", checkout_month)
         
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.ID, "submitQuickBook"))
         ).click()
-        
-        time.sleep(1)
 
         availability = check_hotel_availability()
         return availability
@@ -212,12 +241,17 @@ def main():
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)
         writer.writeheader()
 
-        count = 0 
+        total_urls = sum(1 for row in reader)
+        input_file.seek(0)
+        next(reader)  # Skip header row
+
+        for index, row in enumerate(reader, 1):
+            url = row['URLs']
+            print(f"Processing URL {index} of {total_urls}: {url}")
+            
+            result = process_url(url)
 
         for row in reader:
-            #if count >= 20:
-             #  break
-
             url = row['URLs']
             result = process_url(url)
             
@@ -232,11 +266,9 @@ def main():
                 row.update(status_mapping[result['status']])
 
             writer.writerow(row)
+            print(f"Completed processing URL {index} of {total_urls}")
 
-            count += 1
-            break
-
-    input("Press Enter to close the browser...")
+    print("All URLs have been processed. Results saved in 'updated_passkey_urls.csv'.")
     driver.quit()
 
 if __name__ == "__main__":
