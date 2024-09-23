@@ -107,7 +107,7 @@ def check_hotel_availability(total_hotels):
         single_hotel = WebDriverWait(driver, 1).until(
             EC.presence_of_element_located((By.XPATH, "//div[@class='legend-selected']/span[@class='selected']"))
         )
-        return {"status": "hotels_available", "message": "1"}
+        return {"status": "hotels_available", "message": "1", "fully_booked_hotels": fully_booked_hotels}
     
     except TimeoutException:
         try:
@@ -204,7 +204,6 @@ def get_total_hotels_count():
 
 def process_url(url):
     driver.get(url)
-    
     try:
         accept_cookies()
         driver.execute_script("window.scrollTo(0, 0);")
@@ -267,10 +266,10 @@ def main():
             result = process_url(url)
             
             status_mapping = {
-                'reservations_closed': {'Reservations Open': f'{result['message']}'},
-                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': f'{result['message']}', 'Fully Booked Hotels': f'{result['fully_booked_hotels']}'},
-                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Available Hotels': f'{result['message']}', 'Fully Booked Hotels': f'{result['fully_booked_hotels']}'},
-                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Available Hotels': 'Error', 'Fully Booked Hotels': 'Error', 'Error Message': f'{result['message']}'}
+                'reservations_closed': {'Reservations Open': f'{result.get('message', '')}'},
+                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': f'{result.get('message', '')}', 'Fully Booked Hotels': f'{result.get('fully_booked_hotels', '')}'},
+                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Available Hotels': f'{result.get('message', '')}', 'Fully Booked Hotels': f'{result.get('fully_booked_hotels', '')}'},
+                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Available Hotels': 'Error', 'Fully Booked Hotels': 'Error', 'Error Message': f'{result.get('message', '')}'}
             }
 
             if result['status'] in status_mapping:
