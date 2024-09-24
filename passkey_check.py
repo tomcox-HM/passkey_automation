@@ -9,8 +9,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 chrome_options = Options()
-#chrome_options.add_argument("--headless")
-chrome_options.add_experimental_option("detach", True)
+chrome_options.add_argument("--headless")
+#chrome_options.add_experimental_option("detach", True)
 driver = webdriver.Chrome(options=chrome_options)
 
 def extract_date_range(driver):
@@ -104,6 +104,21 @@ def extract_error_message(error):
 def check_hotel_availability(total_hotels):
     fully_booked_hotels = None
     try:
+        # Check for the new element first
+        page_title_alert = WebDriverWait(driver, 1).until(
+            EC.presence_of_element_located((By.XPATH, "//div[@class='page-title-alert']//h2"))
+        )
+        alert_text = page_title_alert.text
+        match = re.search(r'we located (\d+) hotels with availability', alert_text)
+        if match:
+            available_hotels_count = int(match.group(1))
+            if total_hotels is not None:
+                fully_booked_hotels = total_hotels - available_hotels_count
+            return {"status": "hotels_available", "message": str(available_hotels_count), "fully_booked_hotels": fully_booked_hotels}
+    except TimeoutException:
+        pass  # If the new element is not found, continue with the existing checks
+
+    try:
         single_hotel = WebDriverWait(driver, 1).until(
             EC.presence_of_element_located((By.XPATH, "//div[@class='legend-selected']/span[@class='selected']"))
         )
@@ -120,7 +135,7 @@ def check_hotel_availability(total_hotels):
             if total_hotels is not None:
                 fully_booked_hotels = total_hotels - available_hotels_count
 
-            return {"status": "hotels_available", "message": available_hotels_count, "fully_booked_hotels": fully_booked_hotels}
+            return {"status": "hotels_available", "message": str(available_hotels_count), "fully_booked_hotels": fully_booked_hotels}
         
         except TimeoutException:
             try:
@@ -142,7 +157,6 @@ def check_hotel_availability(total_hotels):
                 
                 except TimeoutException:
                     return {"status": "error", "message": "Unexpected page state"}
-
 def make_reservation_page():
     try:
         try:
@@ -201,12 +215,27 @@ def get_total_hotels_count():
     except (TimeoutException, ValueError):
         print("Unable to get total hotels count")
         return None
+    
+def check_hotels_page():
+    try:
+        single_hotel = WebDriverWait(driver, 1).until(
+            EC.presence_of_element_located((By.XPATH, "//div[@class='legend-selected']/span[@class='selected']"))
+        )
+        return True
+    except TimeoutException:
+        return False
 
 def process_url(url):
     driver.get(url)
     try:
         accept_cookies()
         driver.execute_script("window.scrollTo(0, 0);")
+
+        total_hotels = None
+        if check_hotels_page():
+            print("Directly on available hotels page. Checking availability.")
+            availability = check_hotel_availability(get_total_hotels_count())
+            return availability
 
         if check_calendar_exists():
             print("Calendar found, proceeding with date selection")
@@ -218,7 +247,6 @@ def process_url(url):
         if not check_calendar_exists():
             return {"status": "reservations_closed", "message": "No"}
         
-        total_hotels = None
         if check_view_all_hotels_link():
             total_hotels = get_total_hotels_count()
             driver.back()  # Go back to the main page
