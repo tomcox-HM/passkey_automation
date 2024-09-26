@@ -40,7 +40,7 @@ def test_check_hotel_availability(url):
     print(result)
 
 # Replace 'your_test_url_here' with the actual URL you want to test
-test_url = 'https://book.passkey.com/event/50856363/owner/1482103/list/hotels'
+test_url = ''
 test_check_hotel_availability(test_url)
 
 # Close the driver after the test

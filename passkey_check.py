@@ -224,6 +224,11 @@ def check_hotels_page():
         return True
     except TimeoutException:
         return False
+    
+def extract_owner_id():
+    current_url = driver.current_url
+    match = re.search(r'/owner/(\d+)/', current_url)
+    return match.group(1) if match else None
 
 def process_url(url):
     driver.get(url)
@@ -231,10 +236,14 @@ def process_url(url):
         accept_cookies()
         driver.execute_script("window.scrollTo(0, 0);")
 
+        owner_id = None
+        owner_id = extract_owner_id()
+
         total_hotels = None
         if check_hotels_page():
             print("Directly on available hotels page. Checking availability.")
             availability = check_hotel_availability(get_total_hotels_count())
+            availability['owner_id'] = owner_id
             return availability
 
         if check_calendar_exists():
@@ -245,9 +254,11 @@ def process_url(url):
                 print("Handled dropdown page, proceeding with regular flow")
 
         if not check_calendar_exists():
-            return {"status": "reservations_closed", "message": "No"}
+            return {"status": "reservations_closed", "message": "No", "owner_id": owner_id}
         
         if check_view_all_hotels_link():
+            if not owner_id:
+                owner_id = extract_owner_id()
             total_hotels = get_total_hotels_count()
             driver.back()  # Go back to the main page
             time.sleep(2)
@@ -264,14 +275,15 @@ def process_url(url):
         ).click()
 
         availability = check_hotel_availability(total_hotels)
-
+        availability['owner_id'] = owner_id
+        availability['total_hotels'] = total_hotels
         return availability
         
     except Exception as e:
         print(f"Error processing {url}: {e}")
         driver.save_screenshot("error_processing_url.png")
         error_message = extract_error_message(e)
-        return {"status": "error", "message": str(error_message), "fully_booked_hotels": None}
+        return {"status": "error", "message": str(error_message), "fully_booked_hotels": None, "owner_id": extract_owner_id(), "total_hotels": None}
 
 def main():
     start_time = time.time()
@@ -279,7 +291,7 @@ def main():
         open('updated_passkey_urls.csv', 'w', newline='') as output_file:
         
         reader = csv.DictReader(input_file)
-        fieldnames = reader.fieldnames + ['Reservations Open', 'Fully Booked', 'Available Hotels', 'Fully Booked Hotels', 'Error Message']
+        fieldnames = reader.fieldnames + ['Reservations Open', 'Fully Booked', 'Total Hotels', 'Available Hotels', 'Fully Booked Hotels', 'Owner ID', 'Error Message']
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -294,14 +306,16 @@ def main():
             result = process_url(url)
             
             status_mapping = {
-                'reservations_closed': {'Reservations Open': f'{result.get('message', '')}'},
-                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': f'{result.get('message', '')}', 'Fully Booked Hotels': f'{result.get('fully_booked_hotels', '')}'},
-                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Available Hotels': f'{result.get('message', '')}', 'Fully Booked Hotels': f'{result.get('fully_booked_hotels', '')}'},
-                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Available Hotels': 'Error', 'Fully Booked Hotels': 'Error', 'Error Message': f'{result.get('message', '')}'}
+                'reservations_closed': {'Reservations Open': result.get('message', 'No'), 'Fully Booked': '', 'Total Hotels': result.get('total_hotels', ''), 'Available Hotels': '', 'Fully Booked Hotels': '', 'Error Message': ''},
+                'fully_booked': {'Reservations Open': 'Yes', 'Fully Booked': result.get('message', ''), 'Total Hotels': result.get('total_hotels', ''), 'Available Hotels': '0', 'Fully Booked Hotels': result.get('fully_booked_hotels', ''), 'Error Message': ''},
+                'hotels_available': {'Reservations Open': 'Yes', 'Fully Booked': 'No', 'Total Hotels': result.get('total_hotels', ''), 'Available Hotels': result.get('message', ''), 'Fully Booked Hotels': result.get('fully_booked_hotels', ''), 'Error Message': ''},
+                'error': {'Reservations Open': 'Error', 'Fully Booked': 'Error', 'Total Hotels': result.get('total_hotels', ''), 'Available Hotels': 'Error', 'Fully Booked Hotels': 'Error', 'Error Message': result.get('message', '')}
             }
 
             if result['status'] in status_mapping:
                 row.update(status_mapping[result['status']])
+
+            row['Owner ID'] = result.get('owner_id')
 
             writer.writerow(row)
             print(f"Completed processing URL {index} of {total_urls}")
